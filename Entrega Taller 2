@@ -1,0 +1,119 @@
+# En este enlace se encuentran los insumos requeridos para correr el programa.
+# Los cuales son nube de puntos en formato GEOJSON, y también como axuiliar se suben modelos de campos y shape.
+
+#Entorno de trabajo Google Collab
+
+----------------------------------------------------------------------------
+
+from google.colab import files
+
+uploaded = files.upload()
+
+import geopandas as gpd
+
+
+gdf = gpd.read_file('puntos.geojson')
+
+import matplotlib.pyplot as plt
+
+
+gdf.plot(marker='o', color='blue', markersize=50)
+plt.title("Distribución espacial de puntos")
+plt.show()
+
+
+print("Estadísticas de elevación:")
+print(gdf['COTA'].describe())
+
+
+# Para Kernel
+
+from scipy.stats import gaussian_kde
+import numpy as np
+import matplotlib.pyplot as plt
+
+coords = np.array(list(zip(gdf.geometry.x, gdf.geometry.y))).T
+
+kde = gaussian_kde(coords)
+
+x_min, y_min, x_max, y_max = gdf.total_bounds
+xgrid, ygrid = np.mgrid[x_min:x_max:200j, y_min:y_max:200j]  # mayor resolución
+positions = np.vstack([xgrid.ravel(), ygrid.ravel()])
+density = kde(positions).reshape(xgrid.shape)
+
+fig, ax = plt.subplots(figsize=(10, 8))
+
+
+img = ax.imshow(np.rot90(density), cmap='Blues',
+                extent=[x_min, x_max, y_min, y_max],
+                aspect='auto', alpha=0.85)
+
+
+ax.scatter(gdf.geometry.x, gdf.geometry.y, c='red', s=18, edgecolor='white', linewidth=0.5, label='Estaciones')
+
+cbar = plt.colorbar(img, ax=ax, orientation='vertical', shrink=0.8)
+cbar.set_label('Intensidad de densidad estimada')
+
+
+ax.set_title("", fontsize=14)
+ax.set_xlabel("Longitud")
+ax.set_ylabel("Latitud")
+ax.legend(loc='upper right')
+ax.grid(True, linestyle='--', alpha=0.5)
+
+plt.tight_layout()
+plt.show()
+
+!pip install pysal
+!pip install pysal pointpats
+!pip install pysal libpysal pointpats matplotlib
+
+# Para kipley
+
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.spatial import distance_matrix
+
+coords = np.array(list(zip(gdf.geometry.x, gdf.geometry.y)))
+
+n_points = coords.shape[0]
+area = (gdf.total_bounds[2] - gdf.total_bounds[0]) * (gdf.total_bounds[3] - gdf.total_bounds[1])
+
+
+max_dist = np.sqrt(area) / 2
+
+
+r_values = np.linspace(0, max_dist, 100)
+
+
+dist_matrix = distance_matrix(coords, coords)
+
+
+k_values = []
+for r in r_values:
+    # Número de pares con distancia menor o igual a r (sin contar el mismo punto)
+    count = np.sum((dist_matrix <= r) & (dist_matrix > 0))
+    # Estimación K(r)
+    k = (area / (n_points * (n_points -1))) * count
+    k_values.append(k)
+
+k_values = np.array(k_values)
+k_theoretical = np.pi * r_values**2
+
+plt.plot(r_values, k_values, label='K Observada')
+plt.plot(r_values, k_theoretical, linestyle='--', label='K Teórica (Aleatoria)')
+plt.xlabel('Distancia r')
+plt.ylabel('K(r)')
+plt.title('')
+plt.legend()
+plt.show()
+
+# Para relaciones entre variables
+
+import seaborn as sns
+
+sns.scatterplot(data=gdf, x='COTA', y='PPT', s=100)
+plt.title("Relación entre Elevación y Precipitación")
+plt.show()
+
+

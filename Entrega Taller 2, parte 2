@@ -1,0 +1,131 @@
+# Para regresión Logística
+
+!pip install geopandas matplotlib scikit-learn
+
+import geopandas as gpd
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import (
+    accuracy_score, confusion_matrix, classification_report,
+    roc_curve, roc_auc_score
+)
+from sklearn.preprocessing import StandardScaler
+
+
+gdf = gpd.read_file('puntos.geojson')
+
+print(gdf.columns)
+print(gdf.head())
+
+
+features = ['TIA', 'COTA', 'PPT', 'AREA']
+X = gdf[features]
+
+y = gdf['DESBORDE']
+
+print(X.isnull().sum())
+print(y.isnull().sum())
+# Por ejemplo, eliminar filas con datos faltantes
+mask = X.notnull().all(axis=1) & y.notnull()
+X = X[mask]
+y = y[mask]
+gdf = gdf.loc[mask]
+
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X_scaled, y, test_size=0.2, random_state=42, stratify=y)
+
+model = LogisticRegression()
+model.fit(X_train, y_train)
+
+
+y_pred = model.predict(X_test)
+y_prob = model.predict_proba(X_test)[:,1]
+
+print("Accuracy:", accuracy_score(y_test, y_pred))
+print("Classification Report:\n", classification_report(y_test, y_pred))
+print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
+
+roc_auc = roc_auc_score(y_test, y_prob)
+print("ROC AUC:", roc_auc)
+
+# Curva ROC
+fpr, tpr, thresholds = roc_curve(y_test, y_prob)
+plt.figure(figsize=(7,5))
+plt.plot(fpr, tpr, label=f'ROC curve (area = {roc_auc:.2f})')
+plt.plot([0,1], [0,1], 'k--')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('')
+plt.legend(loc='lower right')
+plt.show()
+
+gdf['prob_desborde'] = model.predict_proba(scaler.transform(gdf[features]))[:,1]
+
+fig, ax = plt.subplots(1,1, figsize=(10,8))
+gdf.plot(column='prob_desborde', cmap='RdYlGn_r', legend=True, ax=ax)
+ax.set_title('')
+plt.show()
+
+fig, ax = plt.subplots(1,1, figsize=(10,8))
+gdf.plot(column='prob_desborde', cmap='RdYlGn_r', legend=True, ax=ax)
+ax.set_title('')
+plt.show()
+
+--------------------------------------------------------------------------------------------------
+# Para conocer coeficientes
+
+!pip install geopandas statsmodels matplotlib
+
+import geopandas as gpd
+import pandas as pd
+import statsmodels.api as sm
+import matplotlib.pyplot as plt
+import numpy as np
+
+gdf = gpd.read_file('puntos.geojson')
+
+features = ['TIA', 'COTA', 'PPT', 'AREA']
+X = gdf[features]
+y = gdf['DESBORDE']
+
+mask = X.notnull().all(axis=1) & y.notnull()
+X = X.loc[mask]
+y = y.loc[mask]
+
+X = sm.add_constant(X)
+
+model = sm.Logit(y, X)
+result = model.fit()
+
+print(result.summary())
+
+coefs = result.params
+conf = result.conf_int()
+conf.columns = ['2.5%', '97.5%']
+
+coef_df = pd.DataFrame({
+    'coef': coefs.values,
+    'lower': conf['2.5%'],
+    'upper': conf['97.5%'],
+}, index=coefs.index)
+
+coef_df_no_const = coef_df.drop('const')
+
+plt.figure(figsize=(8,6))
+plt.errorbar(coef_df_no_const.index, coef_df_no_const['coef'], 
+             yerr=[coef_df_no_const['coef'] - coef_df_no_const['lower'], 
+                   coef_df_no_const['upper'] - coef_df_no_const['coef']],
+             fmt='o', capsize=5)
+plt.axhline(0, color='gray', linestyle='--')
+plt.title('Coeficientes de Regresión Logística y su IC 95%')
+plt.xlabel('Variables')
+plt.ylabel('Coeficiente')
+plt.grid(True)
+plt.show()
+

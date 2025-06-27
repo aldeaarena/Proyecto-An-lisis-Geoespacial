@@ -572,3 +572,305 @@ ax.set_title(f"Mapa de clusters LISA – {var_lisa}", fontsize=14)
 ax.set_axis_off()
 plt.tight_layout()
 plt.show()
+
+
+# Paso 1: Instalar librerías necesarias
+!pip install geopandas scikit-learn matplotlib
+
+# Paso 2: Importar librerías
+import geopandas as gpd
+from sklearn.cluster import KMeans
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+
+# Paso 3: Subir archivo GeoJSON
+from google.colab import files
+uploaded = files.upload()
+
+# Paso 4: Cargar archivo en GeoDataFrame
+import io
+for filename in uploaded.keys():
+    gdf = gpd.read_file(io.BytesIO(uploaded[filename]))
+
+# Paso 5: Asegurar sistema de coordenadas
+gdf = gdf.to_crs(epsg=4326)
+
+# Paso 6: Filtrar por DESBORDE == True
+gdf_filtrado = gdf[gdf["DESBORDE"] == True].copy()
+
+# Verificamos si hay puntos filtrados
+if gdf_filtrado.empty:
+    print("⚠️ No se encontraron puntos con DESBORDE = True (verdadero)")
+else:
+    # Extraer coordenadas
+    gdf_filtrado['lon'] = gdf_filtrado.geometry.x
+    gdf_filtrado['lat'] = gdf_filtrado.geometry.y
+    X = gdf_filtrado[['lon', 'lat']].values
+
+    # Paso 7: Aplicar KMeans
+    n_clusters = 4  # Cambiar si se desea
+    kmeans = KMeans(n_clusters=n_clusters, random_state=0)
+    gdf_filtrado['cluster'] = kmeans.fit_predict(X)
+
+    # Paso 8: Visualizar clusters con estilo personalizado
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    # Dibujar puntos sin leyenda automática
+    gdf_filtrado.plot(ax=ax, column='cluster', cmap='tab10', legend=False, markersize=50, edgecolor='white', linewidth=0.5)
+
+    # Crear barra de color personalizada
+    norm = mpl.colors.Normalize(vmin=gdf_filtrado['cluster'].min(), vmax=gdf_filtrado['cluster'].max())
+    sm = mpl.cm.ScalarMappable(cmap='tab10', norm=norm)
+    sm._A = []
+
+    cbar = fig.colorbar(sm, ax=ax, fraction=0.03, pad=0.02, shrink=0.6)
+    cbar.ax.set_ylabel('Cluster', rotation=270, labelpad=15)
+    cbar.ax.tick_params(labelsize=8)
+    cbar.outline.set_visible(False)
+
+    # Opcional: mover la barra a una esquina (ajustable)
+    cbar.ax.set_position([0.88, 0.3, 0.02, 0.4])
+
+    # Personalizar gráfico
+    ax.set_title(f'Clustering K-means con {n_clusters} grupos\n(solo DESBORDE = True)', fontsize=14, weight='bold')
+    ax.set_xlabel('Longitud', fontsize=11)
+    ax.set_ylabel('Latitud', fontsize=11)
+    ax.tick_params(labelsize=10)
+    ax.set_facecolor('white')
+    ax.grid(False)
+    plt.tight_layout()
+    plt.show()
+
+    # Paso 9: Tabla resumen
+    print("\nNúmero de puntos por cluster (DESBORDE = True):")
+    print(gdf_filtrado['cluster'].value_counts().sort_index())
+
+#Para correr modelo OLS
+
+# Instalar paquetes necesarios
+!pip install geopandas pysal
+
+# Importar librerías
+import geopandas as gpd
+from pysal.model import spreg
+import numpy as np
+import pandas as pd
+from google.colab import files
+import io
+
+# Subir archivo GeoJSON
+uploaded = files.upload()
+for filename in uploaded.keys():
+    gdf = gpd.read_file(io.BytesIO(uploaded[filename]))
+
+# Asegurar CRS correcto
+gdf = gdf.to_crs(epsg=4326)
+
+# Convertir variable dependiente a binaria (1 para True, 0 para False)
+gdf['DESBORDE_BIN'] = gdf['DESBORDE'].astype(int)
+
+# Variables explicativas numéricas disponibles
+#vars_explicativas = ['AREA', 'AREA IMP', 'AREA PERM', 'TIA', 'PPT', 'COTA', 'w_PPT']
+vars_explicativas = ['AREA', 'AREA IMP', 'AREA PERM', 'TIA', 'PPT', 'COTA']
+
+# Eliminar nulos
+gdf_clean = gdf.dropna(subset=['DESBORDE_BIN'] + vars_explicativas).copy()
+
+# Convertir a matrices NumPy para OLS
+y = gdf_clean[['DESBORDE_BIN']].values
+X = gdf_clean[vars_explicativas].values
+
+# Ajustar modelo OLS
+modelo = spreg.OLS(y, X, name_y='DESBORDE_BIN', name_x=vars_explicativas)
+
+# Mostrar resumen del modelo
+print(modelo.summary)
+
+
+#Para correr modelo SAR
+# Instalar librerías necesarias
+!pip install geopandas libpysal spreg
+
+# Importar librerías
+import geopandas as gpd
+import numpy as np
+import pandas as pd
+from pysal.model import spreg
+from pysal.lib import weights
+from google.colab import files
+import io
+
+# Subir archivo GeoJSON
+uploaded = files.upload()
+for filename in uploaded.keys():
+    gdf = gpd.read_file(io.BytesIO(uploaded[filename]))
+
+# Asegurar sistema de coordenadas
+gdf = gdf.to_crs(epsg=4326)
+
+# Convertir variable dependiente a binaria
+gdf['DESBORDE_BIN'] = gdf['DESBORDE'].astype(int)
+
+# Variables explicativas numéricas
+vars_explicativas = ['AREA', 'AREA IMP', 'AREA PERM', 'TIA', 'PPT', 'COTA']
+
+# Eliminar filas con nulos
+gdf_clean = gdf.dropna(subset=['DESBORDE_BIN'] + vars_explicativas).copy()
+
+# Resetear índice
+gdf_clean.reset_index(drop=True, inplace=True)
+
+# Obtener coordenadas para matriz espacial
+coords = list(zip(gdf_clean.geometry.x, gdf_clean.geometry.y))
+
+# Crear matriz de pesos espaciales (8 vecinos más cercanos)
+w = weights.KNN(coords, k=3)
+w.transform = 'r'  # Estándar row-standardized weights
+
+# Crear matrices para el modelo
+y = gdf_clean[['DESBORDE_BIN']].values
+X = gdf_clean[vars_explicativas].values
+
+import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
+
+# Coordenadas (ya están en la misma variable que usaste para SAR)
+coords = list(zip(gdf_clean.geometry.x, gdf_clean.geometry.y))
+
+# Crear las líneas entre vecinos
+lines = []
+for i, neighbors in w.neighbors.items():
+    for j in neighbors:
+        line = [coords[i], coords[j]]
+        lines.append(line)
+
+# Crear el gráfico
+fig, ax = plt.subplots(figsize=(8, 6))
+gdf_clean.plot(ax=ax, color='skyblue', markersize=30, edgecolor='black')
+
+# Agregar las líneas de conexión
+lc = LineCollection(lines, colors='crimson', linewidths=0.8, alpha=0.7)
+ax.add_collection(lc)
+
+plt.title("Conectividad espacial (matriz de pesos usada en SAR)", fontsize=14)
+plt.xlabel("Longitud")
+plt.ylabel("Latitud")
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+
+# Ajustar modelo SAR
+modelo_sar = spreg.ML_Lag(y, X, w=w, name_y='DESBORDE_BIN', name_x=vars_explicativas)
+
+# Mostrar resumen
+print(modelo_sar.summary)
+
+# Obtener la matriz completa de pesos espaciales como array (forma densa)
+W_matrix, ids = w.full()
+print("Matriz de pesos espaciales (forma densa):")
+print(pd.DataFrame(W_matrix))
+
+#Para correr modelo SLX
+# Instalar librerías necesarias
+!pip install geopandas libpysal spreg
+
+# Importar librerías
+import geopandas as gpd
+import numpy as np
+import pandas as pd
+from pysal.lib import weights
+from spreg import OLS
+from google.colab import files
+import io
+
+# Subir archivo GeoJSON
+uploaded = files.upload()
+for filename in uploaded.keys():
+    gdf = gpd.read_file(io.BytesIO(uploaded[filename]))
+
+
+# Asegurar sistema de coordenadas geográficas
+gdf = gdf.to_crs(epsg=4326)
+
+# Crear variable binaria a partir de DESBORDE
+gdf['DESBORDE_BIN'] = gdf['DESBORDE'].astype(int)
+
+# Definir variables explicativas (ajusta nombres si es necesario)
+vars_explicativas = ['AREA', 'AREA IMP', 'AREA PERM', 'TIA', 'PPT', 'COTA']
+
+# Eliminar filas con nulos
+gdf_clean = gdf.dropna(subset=['DESBORDE_BIN'] + vars_explicativas).copy()
+gdf_clean.reset_index(drop=True, inplace=True)
+
+# Crear coordenadas para matriz espacial
+coords = list(zip(gdf_clean.geometry.x, gdf_clean.geometry.y))
+
+# Crear matriz de pesos espaciales (KNN con 8 vecinos)
+w = weights.KNN(coords, k=6)
+w.transform = 'r'  # Estandarización por fila
+
+# Crear lag espacial de las variables explicativas
+WX = weights.lag_spatial(w, gdf_clean[vars_explicativas])
+
+# Concatenar X + WX como variables del modelo
+X_comb = np.hstack([gdf_clean[vars_explicativas].values, WX])
+
+# Crear lista de nombres de variables: originales y espaciales
+WX_names = [f"W_{var}" for var in vars_explicativas]
+all_vars = vars_explicativas + WX_names
+
+# Variable dependiente
+y = gdf_clean[['DESBORDE_BIN']].values
+
+# Ajustar modelo SLX como OLS extendido
+modelo_slx = OLS(y, X_comb, name_y='DESBORDE_BIN', name_x=all_vars)
+
+# Mostrar resumen del modelo
+print(modelo_slx.summary)
+
+# Para modelo SEM
+# Instalar librerías necesarias si no están instaladas
+!pip install geopandas libpysal spreg
+
+# Importar librerías
+import geopandas as gpd
+import numpy as np
+import pandas as pd
+from pysal.lib import weights
+from spreg import GM_Error_Het  # SEM robusto (puedes cambiar por GM_Error si no quieres heterocedasticidad)
+from google.colab import files
+import io
+
+# Subir archivo GeoJSON desde el equipo
+uploaded = files.upload()
+for filename in uploaded.keys():
+    gdf = gpd.read_file(io.BytesIO(uploaded[filename]))
+
+# Asegurar sistema de coordenadas geográficas
+gdf = gdf.to_crs(epsg=4326)
+
+# Crear variable binaria a partir de DESBORDE
+gdf['DESBORDE_BIN'] = gdf['DESBORDE'].astype(int)
+
+# Definir variables explicativas
+vars_explicativas = ['AREA', 'AREA IMP', 'AREA PERM', 'TIA', 'PPT', 'COTA']
+
+# Limpiar datos (quitar nulos)
+gdf_clean = gdf.dropna(subset=['DESBORDE_BIN'] + vars_explicativas).copy()
+gdf_clean.reset_index(drop=True, inplace=True)
+
+# Crear coordenadas y matriz de pesos espaciales (KNN con 8 vecinos)
+coords = list(zip(gdf_clean.geometry.x, gdf_clean.geometry.y))
+w = weights.KNN(coords, k=8)
+w.transform = 'r'
+
+# Variable dependiente y matriz de explicativas
+y = gdf_clean[['DESBORDE_BIN']].values
+X = gdf_clean[vars_explicativas].values
+
+# Ajustar modelo SEM (robusto a heterocedasticidad)
+modelo_sem = GM_Error_Het(y, X, w=w, name_y='DESBORDE_BIN', name_x=vars_explicativas)
+
+# Mostrar resumen del modelo
+print(modelo_sem.summary)
